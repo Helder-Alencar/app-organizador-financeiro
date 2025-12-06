@@ -91,6 +91,17 @@ export function ModalReserva({ onClose, onSuccess }: ModalReservaProps) {
     if (!error) {
       onSuccess()
       onClose()
+      return
+    }
+
+    // Log and notify the user about the error to aid debugging
+    // Show error in console and a simple alert so the user sees it in the browser.
+    // eslint-disable-next-line no-console
+    console.error('Erro ao inserir reserva/investimento:', error)
+    try {
+      alert('Erro ao salvar reserva: ' + (error.message || JSON.stringify(error)))
+    } catch (e) {
+      // ignore
     }
   }
 

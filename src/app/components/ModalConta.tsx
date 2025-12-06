@@ -92,6 +92,19 @@ export function ModalConta({ onClose, onSuccess }: ModalContaProps) {
     if (!error) {
       onSuccess()
       onClose()
+      return
+    }
+
+    // Log and notify the user about the error to aid debugging
+    // (Entries/Expenses were working — if this fails, DB schema or required fields may differ)
+    // Show error in console and a simple alert so the user sees it in the browser.
+    // You can remove or replace alert with a nicer toast later.
+    // eslint-disable-next-line no-console
+    console.error('Erro ao inserir conta fixa:', error)
+    try {
+      alert('Erro ao salvar conta: ' + (error.message || JSON.stringify(error)))
+    } catch (e) {
+      // ignore
     }
   }
 
