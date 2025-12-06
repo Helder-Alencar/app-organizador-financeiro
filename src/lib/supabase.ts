@@ -3,10 +3,10 @@ import { createClient } from '@supabase/supabase-js'
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
-// Criar cliente apenas se as credenciais existirem
-export const supabase = supabaseUrl && supabaseAnonKey 
-  ? createClient(supabaseUrl, supabaseAnonKey)
-  : null
+// Criar cliente Supabase (sempre criar o cliente para evitar checagens de null em tempo de compilação).
+// Em runtime, se as variáveis de ambiente estiverem vazias, chamadas à API podem falhar,
+// mas isso evita muitos erros TypeScript sobre `supabase` possivelmente nulo.
+export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
 // Types
 export interface UserProfile {
@@ -52,6 +52,9 @@ export interface ContaFixa {
   valor: number
   dia_vencimento?: number
   ativa: boolean
+  // Campos opcionais presentes no banco e usados na UI
+  data?: string
+  categoria?: string
   created_at: string
 }
 
@@ -62,5 +65,7 @@ export interface ReservaInvestimento {
   valor: number
   tipo: 'reserva_emergencia' | 'meta' | 'investimento'
   data: string
+  // categoria pode existir dependendo da tabela/consulta
+  categoria?: string
   created_at: string
 }
