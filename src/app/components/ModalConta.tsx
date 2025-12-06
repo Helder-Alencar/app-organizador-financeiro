@@ -83,7 +83,6 @@ export function ModalConta({ onClose, onSuccess }: ModalContaProps) {
       descricao: formData.descricao,
       valor: formData.valorCentavos / 100,
       data: dataCorreta,
-      categoria: formData.categoria || null,
       ativa: true,
     })
 

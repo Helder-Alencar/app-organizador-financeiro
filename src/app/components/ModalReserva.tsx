@@ -83,7 +83,6 @@ export function ModalReserva({ onClose, onSuccess }: ModalReservaProps) {
       descricao: formData.descricao,
       valor: formData.valorCentavos / 100,
       data: dataCorreta,
-      tipo_investimento: formData.categoria || null,
     })
 
     setLoading(false)
