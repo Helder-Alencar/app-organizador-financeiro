@@ -1,236 +1,76 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { supabase } from '@/lib/supabase'
-import { X, Plus } from 'lucide-react'
+import { useState } from 'react'
+import { toast } from 'sonner'
+import { type Meta, type ReservaInvestimento } from '@/lib/supabase'
+import { hojeISO } from '@/lib/formato'
+import { avisarErro } from '@/lib/erros'
+import { salvarRegistro } from '@/lib/lancamentos'
+import { ModalBase } from './ModalBase'
+import { CampoCategoria, CampoData, CampoTexto, CampoValor } from './Campos'
+import { classeInput, classeLabel } from './estilos'
 
 interface ModalReservaProps {
+  userId: string
+  metas: Meta[]
+  item?: ReservaInvestimento
   onClose: () => void
   onSuccess: () => void
 }
 
-export function ModalReserva({ onClose, onSuccess }: ModalReservaProps) {
-  const [loading, setLoading] = useState(false)
-  const [categorias, setCategorias] = useState<string[]>([])
-  const [mostrarNovaCat, setMostrarNovaCat] = useState(false)
-  const [novaCat, setNovaCat] = useState('')
-  const [formData, setFormData] = useState({
-    descricao: '',
-    valorDisplay: 'R$ 0,00',
-    valorCentavos: 0,
-    data: new Date().toISOString().split('T')[0],
-    categoria: '',
-  })
+export function ModalReserva({ userId, metas, item, onClose, onSuccess }: ModalReservaProps) {
+  const [salvando, setSalvando] = useState(false)
+  const [descricao, setDescricao] = useState(item?.descricao ?? '')
+  const [centavos, setCentavos] = useState(item ? Math.round(Number(item.valor) * 100) : 0)
+  const [data, setData] = useState(item?.data ?? hojeISO())
+  const [categoria, setCategoria] = useState(item?.categoria ?? '')
+  const [metaId, setMetaId] = useState(item?.meta_id ?? '')
 
-  useEffect(() => {
-    carregarCategorias()
-  }, [])
-
-  const carregarCategorias = async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-
-    const { data } = await supabase
-      .from('reservas_investimentos')
-      .select('tipo_investimento')
-      .eq('user_id', user.id)
-      .not('tipo_investimento', 'is', null)
-
-    if (data) {
-      const cats = [...new Set(data.map(d => d.tipo_investimento).filter(Boolean))]
-      setCategorias(cats)
-    }
-  }
-
-  const adicionarCategoria = () => {
-    if (novaCat.trim() && !categorias.includes(novaCat.trim())) {
-      setCategorias([...categorias, novaCat.trim()])
-      setFormData({ ...formData, categoria: novaCat.trim() })
-      setNovaCat('')
-      setMostrarNovaCat(false)
-    }
-  }
-
-  const formatarMoeda = (centavos: number) => {
-    const reais = centavos / 100
-    return `R$ ${reais.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-  }
-
-  const handleValorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const input = e.target.value.replace(/\D/g, '')
-    const centavos = parseInt(input || '0')
-    
-    setFormData({
-      ...formData,
-      valorCentavos: centavos,
-      valorDisplay: formatarMoeda(centavos)
+  const salvar = async () => {
+    if (centavos <= 0) return toast.error('Informe um valor maior que zero')
+    setSalvando(true)
+    const { error } = await salvarRegistro('reservas_investimentos', item?.id, {
+      user_id: userId,
+      descricao,
+      valor: centavos / 100,
+      data,
+      categoria: categoria || null,
+      meta_id: metaId || null,
     })
-  }
+    setSalvando(false)
+    if (error) return avisarErro('salvar a reserva', error)
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-
-    // Converter data para formato correto sem timezone
-    const [ano, mes, dia] = formData.data.split('-')
-    const dataCorreta = `${ano}-${mes}-${dia}`
-
-    const { error } = await supabase.from('reservas_investimentos').insert({
-      user_id: user.id,
-      descricao: formData.descricao,
-      valor: formData.valorCentavos / 100,
-      data: dataCorreta,
-    })
-
-    setLoading(false)
-
-    if (!error) {
-      onSuccess()
-      onClose()
-      return
-    }
-
-    // Log and notify the user about the error to aid debugging
-    // Show error in console and a simple alert so the user sees it in the browser.
-    // eslint-disable-next-line no-console
-    console.error('Erro ao inserir reserva/investimento:', error)
-    try {
-      alert('Erro ao salvar reserva: ' + (error.message || JSON.stringify(error)))
-    } catch (e) {
-      // ignore
-    }
+    toast.success(item ? 'Reserva atualizada' : 'Reserva adicionada')
+    onSuccess()
+    onClose()
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-bold text-gray-900">Nova Reserva/Investimento</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-            <X className="w-6 h-6" />
-          </button>
+    <ModalBase
+      titulo={item ? 'Editar Reserva/Investimento' : 'Nova Reserva/Investimento'}
+      cor="blue"
+      salvando={salvando}
+      onClose={onClose}
+      onSubmit={salvar}
+    >
+      <CampoTexto rotulo="Descrição" valor={descricao} onChange={setDescricao} cor="blue" placeholder="Ex: Tesouro Direto, Poupança..." />
+      <CampoValor centavos={centavos} onChange={setCentavos} cor="blue" />
+      <CampoData valor={data} onChange={setData} cor="blue" />
+      <CampoCategoria tipo="reserva" userId={userId} valor={categoria} onChange={setCategoria} cor="blue" />
+
+      {metas.length > 0 && (
+        <div>
+          <label className={classeLabel}>Meta</label>
+          <select value={metaId} onChange={(e) => setMetaId(e.target.value)} className={classeInput('blue')}>
+            <option value="">Nenhuma</option>
+            {metas.map((meta) => (
+              <option key={meta.id} value={meta.id}>
+                {meta.nome}
+              </option>
+            ))}
+          </select>
         </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Descrição *
-            </label>
-            <input
-              type="text"
-              required
-              value={formData.descricao}
-              onChange={(e) => setFormData({ ...formData, descricao: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              placeholder="Ex: Tesouro Direto, Poupança..."
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Valor *
-            </label>
-            <input
-              type="text"
-              required
-              value={formData.valorDisplay}
-              onChange={handleValorChange}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-lg font-semibold"
-              placeholder="R$ 0,00"
-            />
-            <p className="text-xs text-gray-500 mt-1">Digite apenas números. Ex: 12345 = R$ 123,45</p>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Data *
-            </label>
-            <input
-              type="date"
-              required
-              value={formData.data}
-              onChange={(e) => setFormData({ ...formData, data: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Categoria
-            </label>
-            {!mostrarNovaCat ? (
-              <div className="flex gap-2">
-                <select
-                  value={formData.categoria}
-                  onChange={(e) => setFormData({ ...formData, categoria: e.target.value })}
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="">Selecione...</option>
-                  {categorias.map(cat => (
-                    <option key={cat} value={cat}>{cat}</option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => setMostrarNovaCat(true)}
-                  className="px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
-                  title="Adicionar nova categoria"
-                >
-                  <Plus className="w-5 h-5" />
-                </button>
-              </div>
-            ) : (
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={novaCat}
-                  onChange={(e) => setNovaCat(e.target.value)}
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="Nome da nova categoria..."
-                  autoFocus
-                />
-                <button
-                  type="button"
-                  onClick={adicionarCategoria}
-                  className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
-                >
-                  Adicionar
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMostrarNovaCat(false)
-                    setNovaCat('')
-                  }}
-                  className="px-3 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-            )}
-          </div>
-
-          <div className="flex gap-3 pt-4">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50"
-            >
-              {loading ? 'Salvando...' : 'Salvar'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+      )}
+    </ModalBase>
   )
 }
