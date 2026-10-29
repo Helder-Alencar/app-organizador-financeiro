@@ -1,36 +1,56 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 💰 Organizador Financeiro
 
-## Getting Started
+Controle de finanças pessoais: entradas, gastos (com parcelamento no crédito), contas fixas com controle de pagamento mensal, reservas/investimentos e metas.
 
-First, run the development server:
+Feito com Next.js 15, React 19, Tailwind CSS 4 e Supabase (login e banco de dados). Publicado em https://app-organizador-financeiro.vercel.app.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## Rodando localmente
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+1. Instale as dependências:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+   ```bash
+   npm install
+   ```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+2. Copie `.env.example` para `.env.local` e preencha com a URL e a chave anon do projeto Supabase (Project Settings > API).
 
-## Learn More
+3. Suba o servidor e abra http://localhost:3000:
 
-To learn more about Next.js, take a look at the following resources:
+   ```bash
+   npm run dev
+   ```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Outros comandos: `npm run build` (build de produção, também verifica os tipos) e `npm run lint`.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Banco de dados (Supabase)
 
-## Deploy on Vercel
+As tabelas usadas são:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+| Tabela | Conteúdo |
+|---|---|
+| `users_profile` | Nome de exibição de cada usuário |
+| `entradas` | Receitas |
+| `gastos` | Despesas (cada parcela de uma compra parcelada é uma linha) |
+| `contas_fixas` | Contas mensais; o dia da coluna `data` é o dia de vencimento |
+| `contas_pagamentos` | Uma linha por conta e mês pago (`mes` = `YYYY-MM`) |
+| `reservas_investimentos` | Dinheiro guardado, opcionalmente ligado a uma meta (`meta_id`) |
+| `metas` | Objetivos com valor-alvo |
+| `categorias` | Categorias criadas pelo usuário, por tipo (`entrada`, `gasto`, `conta`, `reserva`) |
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+As alterações de estrutura ficam em [`supabase/migrations`](supabase/migrations). Para aplicar, abra o SQL Editor do Supabase, cole o arquivo e rode. Os scripts podem ser executados mais de uma vez.
+
+**Segurança:** todas as tabelas têm RLS ativo com a política `dono_dos_dados`: cada usuário só lê e altera as linhas em que `user_id` é o seu próprio id.
+
+## Autenticação
+
+- O login usa cookies (`@supabase/ssr`), e o [`src/middleware.ts`](src/middleware.ts) bloqueia as páginas para quem não está logado.
+- Os links enviados por e-mail (confirmação de cadastro e "Esqueci minha senha") passam por [`/auth/callback`](src/app/auth/callback/route.ts).
+- No Supabase, em **Authentication > URL Configuration**, as URLs `https://app-organizador-financeiro.vercel.app/**` e `http://localhost:3000/**` precisam estar em **Redirect URLs**.
+
+## Como os totais são calculados
+
+Para o período escolhido no filtro:
+
+- **Saldo do período** = entradas − gastos − contas fixas pagas − reservas.
+- **Contas fixas** entram no saldo quando são marcadas como pagas, na data do pagamento.
+- Na aba **Este Mês**, os cards de entradas e gastos comparam com o mês anterior.
