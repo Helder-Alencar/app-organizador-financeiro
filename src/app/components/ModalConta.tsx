@@ -7,7 +7,8 @@ import { hojeISO } from '@/lib/formato'
 import { avisarErro } from '@/lib/erros'
 import { salvarRegistro } from '@/lib/lancamentos'
 import { ModalBase } from './ModalBase'
-import { CampoCategoria, CampoData, CampoTexto, CampoValor } from './Campos'
+import { CampoCategoria, CampoTexto, CampoValor } from './Campos'
+import { classeInput, classeLabel } from './estilos'
 
 interface ModalContaProps {
   userId: string
@@ -20,7 +21,7 @@ export function ModalConta({ userId, item, onClose, onSuccess }: ModalContaProps
   const [salvando, setSalvando] = useState(false)
   const [descricao, setDescricao] = useState(item?.descricao ?? '')
   const [centavos, setCentavos] = useState(item ? Math.round(Number(item.valor) * 100) : 0)
-  const [data, setData] = useState(item?.data ?? hojeISO())
+  const [diaVencimento, setDiaVencimento] = useState(item?.dia_vencimento ?? Number(hojeISO().slice(8, 10)))
   const [categoria, setCategoria] = useState(item?.categoria ?? '')
 
   const salvar = async () => {
@@ -30,7 +31,7 @@ export function ModalConta({ userId, item, onClose, onSuccess }: ModalContaProps
       user_id: userId,
       descricao,
       valor: centavos / 100,
-      data,
+      dia_vencimento: diaVencimento,
       categoria: categoria || null,
       ativa: true,
     })
@@ -47,8 +48,15 @@ export function ModalConta({ userId, item, onClose, onSuccess }: ModalContaProps
       <CampoTexto rotulo="Descrição" valor={descricao} onChange={setDescricao} cor="orange" placeholder="Ex: Aluguel, Internet..." />
       <CampoValor rotulo="Valor mensal" centavos={centavos} onChange={setCentavos} cor="orange" />
       <div>
-        <CampoData rotulo="Primeiro vencimento" valor={data} onChange={setData} cor="orange" />
-        <p className="text-xs text-gray-500 mt-1">A conta vence todo mês neste mesmo dia, a partir deste mês.</p>
+        <label className={classeLabel}>Dia do vencimento *</label>
+        <select value={diaVencimento} onChange={(e) => setDiaVencimento(Number(e.target.value))} className={classeInput('orange')}>
+          {Array.from({ length: 31 }, (_, i) => i + 1).map((dia) => (
+            <option key={dia} value={dia}>
+              Dia {dia}
+            </option>
+          ))}
+        </select>
+        <p className="text-xs text-gray-500 mt-1">A conta vence todo mês neste dia.</p>
       </div>
       <CampoCategoria tipo="conta" userId={userId} valor={categoria} onChange={setCategoria} cor="orange" />
     </ModalBase>

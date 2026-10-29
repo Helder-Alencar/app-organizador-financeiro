@@ -28,6 +28,11 @@ export function mesDe(iso: string): string {
   return iso.slice(0, 7)
 }
 
+// Mês local de um timestamp do banco (ex.: created_at)
+export function mesDeTimestamp(timestamp: string): string {
+  return mesDe(paraISO(new Date(timestamp)))
+}
+
 export function mesAtual(): string {
   return mesDe(hojeISO())
 }

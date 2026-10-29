@@ -2,8 +2,17 @@
 
 import { AlertTriangle, Check } from 'lucide-react'
 import { toast } from 'sonner'
-import { supabase, type ContaFixa, type Entrada, type Gasto, type Meta, type PagamentoConta, type ReservaInvestimento } from '@/lib/supabase'
-import { formatarData, formatarMes, formatarMoeda, hojeISO, mesAtual, mesDe } from '@/lib/formato'
+import {
+  supabase,
+  TIPOS_RESERVA,
+  type ContaFixa,
+  type Entrada,
+  type Gasto,
+  type Meta,
+  type PagamentoConta,
+  type ReservaInvestimento,
+} from '@/lib/supabase'
+import { formatarData, formatarMes, formatarMoeda, hojeISO, mesAtual, mesDeTimestamp } from '@/lib/formato'
 import { avisarErro } from '@/lib/erros'
 import { Tabela, type Coluna } from './Tabela'
 
@@ -70,6 +79,7 @@ export function TabelaReservas({ reservas, metas, ...props }: PropsComuns<Reserv
       mensagemVazio="Nenhuma reserva ou investimento no período"
       colunas={[
         ...colunasBase<ReservaInvestimento>(),
+        { titulo: 'Tipo', valor: (r) => TIPOS_RESERVA[r.tipo] ?? r.tipo },
         { titulo: 'Meta', valor: (r) => nomeMeta(r.meta_id) },
         { ...valor('text-blue-600'), valor: (r) => formatarMoeda(Number(r.valor)) },
       ]}
@@ -88,7 +98,6 @@ interface TabelaContasProps extends PropsComuns<ContaFixa> {
 export function TabelaContas({ userId, contas, pagamentosMes, onEditar, onReload }: TabelaContasProps) {
   const mes = mesAtual()
   const diaHoje = Number(hojeISO().slice(8, 10))
-  const diaVencimento = (conta: ContaFixa) => Number(conta.data.slice(8, 10))
 
   const marcarPaga = async (conta: ContaFixa) => {
     const { error } = await supabase.from('contas_pagamentos').insert({
@@ -110,8 +119,9 @@ export function TabelaContas({ userId, contas, pagamentosMes, onEditar, onReload
   }
 
   const situacao = (conta: ContaFixa) => {
-    if (mesDe(conta.data) > mes) {
-      return <span className="text-gray-500">A partir de {formatarMes(mesDe(conta.data), 'curto')}</span>
+    // Conta cadastrada depois deste mês (só acontece com relógio do aparelho atrasado)
+    if (mesDeTimestamp(conta.created_at) > mes) {
+      return <span className="text-gray-500">A partir de {formatarMes(mesDeTimestamp(conta.created_at), 'curto')}</span>
     }
 
     const pagamento = pagamentosMes.find((p) => p.conta_id === conta.id)
@@ -127,7 +137,7 @@ export function TabelaContas({ userId, contas, pagamentosMes, onEditar, onReload
       )
     }
 
-    const atrasada = diaHoje > diaVencimento(conta)
+    const atrasada = conta.dia_vencimento != null && diaHoje > conta.dia_vencimento
     return (
       <span className="inline-flex items-center gap-2">
         {atrasada && (
@@ -156,7 +166,11 @@ export function TabelaContas({ userId, contas, pagamentosMes, onEditar, onReload
       mensagemVazio="Nenhuma conta fixa cadastrada"
       subtitulo={<>Situação em {formatarMes(mes)}</>}
       colunas={[
-        { titulo: 'Vencimento', valor: (c) => `Dia ${diaVencimento(c)}`, classe: 'text-gray-600 whitespace-nowrap' },
+        {
+          titulo: 'Vencimento',
+          valor: (c) => (c.dia_vencimento ? `Dia ${c.dia_vencimento}` : '-'),
+          classe: 'text-gray-600 whitespace-nowrap',
+        },
         { titulo: 'Descrição', valor: (c) => c.descricao, classe: 'text-gray-900 font-medium' },
         { titulo: 'Categoria', valor: (c) => c.categoria || '-' },
         { titulo: 'Situação', valor: situacao },

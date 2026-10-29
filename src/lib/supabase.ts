@@ -56,8 +56,8 @@ export interface ContaFixa {
   user_id: string
   descricao: string
   valor: number
-  // Primeiro vencimento; o dia desta data é o dia de vencimento de todo mês
-  data: string
+  // Dia do mês (1 a 31); a conta vale a partir do mês em que foi cadastrada
+  dia_vencimento: number | null
   categoria?: string | null
   ativa: boolean
   created_at: string
@@ -74,11 +74,20 @@ export interface PagamentoConta {
   created_at: string
 }
 
+export type TipoReserva = 'reserva_emergencia' | 'meta' | 'investimento'
+
+export const TIPOS_RESERVA: Record<TipoReserva, string> = {
+  reserva_emergencia: 'Reserva de Emergência',
+  meta: 'Meta',
+  investimento: 'Investimento',
+}
+
 export interface ReservaInvestimento {
   id: string
   user_id: string
   descricao: string
   valor: number
+  tipo: TipoReserva
   data: string
   categoria?: string | null
   meta_id?: string | null

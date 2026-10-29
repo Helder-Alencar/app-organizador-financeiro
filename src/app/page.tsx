@@ -13,7 +13,7 @@ import {
   type PagamentoConta,
   type ReservaInvestimento,
 } from '@/lib/supabase'
-import { formatarMes, formatarMoeda, mesAtual, mesDe, somar } from '@/lib/formato'
+import { formatarMes, formatarMoeda, mesAtual, mesDe, mesDeTimestamp, somar } from '@/lib/formato'
 import { calcularIntervalo, limites, ultimosMeses, type Intervalo, type PeriodoFiltro } from '@/lib/periodo'
 import { avisarErro } from '@/lib/erros'
 import { baixarCSV } from '@/lib/csv'
@@ -115,7 +115,7 @@ export default function DashboardPage() {
     const fimHistorico = calcularIntervalo('mes', { inicio: null, fim: null }).fim!
 
     const [c, pm, m, rm, he, hg, hp] = await Promise.all([
-      supabase.from('contas_fixas').select('*').eq('user_id', user.id).eq('ativa', true).order('data'),
+      supabase.from('contas_fixas').select('*').eq('user_id', user.id).eq('ativa', true).order('dia_vencimento'),
       supabase.from('contas_pagamentos').select('*').eq('user_id', user.id).eq('mes', mesAtual()),
       supabase.from('metas').select('*').eq('user_id', user.id).order('created_at'),
       supabase.from('reservas_investimentos').select('meta_id, valor').eq('user_id', user.id).not('meta_id', 'is', null),
@@ -166,7 +166,7 @@ export default function DashboardPage() {
 
   const mes = mesAtual()
   const pendentesMes = somar(
-    contas.filter((c) => mesDe(c.data) <= mes && !pagamentosMes.some((p) => p.conta_id === c.id))
+    contas.filter((c) => mesDeTimestamp(c.created_at) <= mes && !pagamentosMes.some((p) => p.conta_id === c.id))
   )
 
   // Evolução mensal e comparação com o mês anterior

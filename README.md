@@ -31,9 +31,9 @@ As tabelas usadas são:
 | `users_profile` | Nome de exibição de cada usuário |
 | `entradas` | Receitas |
 | `gastos` | Despesas (cada parcela de uma compra parcelada é uma linha) |
-| `contas_fixas` | Contas mensais; o dia da coluna `data` é o dia de vencimento |
+| `contas_fixas` | Contas mensais, com o dia do mês em `dia_vencimento` |
 | `contas_pagamentos` | Uma linha por conta e mês pago (`mes` = `YYYY-MM`) |
-| `reservas_investimentos` | Dinheiro guardado, opcionalmente ligado a uma meta (`meta_id`) |
+| `reservas_investimentos` | Dinheiro guardado; `tipo` é `reserva_emergencia`, `meta` ou `investimento`, e `meta_id` liga a uma meta |
 | `metas` | Objetivos com valor-alvo |
 | `categorias` | Categorias criadas pelo usuário, por tipo (`entrada`, `gasto`, `conta`, `reserva`) |
 
