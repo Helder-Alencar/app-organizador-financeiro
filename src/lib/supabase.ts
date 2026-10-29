@@ -1,12 +1,16 @@
-import { createClient } from '@supabase/supabase-js'
+import { createBrowserClient } from '@supabase/ssr'
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
-// Criar cliente Supabase (sempre criar o cliente para evitar checagens de null em tempo de compilação).
-// Em runtime, se as variáveis de ambiente estiverem vazias, chamadas à API podem falhar,
-// mas isso evita muitos erros TypeScript sobre `supabase` possivelmente nulo.
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error(
+    'Supabase não configurado: defina NEXT_PUBLIC_SUPABASE_URL e NEXT_PUBLIC_SUPABASE_ANON_KEY no .env.local (veja .env.example).'
+  )
+}
+
+// Cliente do navegador: guarda a sessão em cookies, que o middleware consegue ler.
+export const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey)
 
 // Types
 export interface UserProfile {
@@ -16,11 +20,13 @@ export interface UserProfile {
   created_at: string
 }
 
+export type TipoCategoria = 'entrada' | 'gasto' | 'conta' | 'reserva'
+
 export interface Categoria {
   id: string
   user_id: string
   nome: string
-  tipo: 'entrada' | 'gasto'
+  tipo: TipoCategoria
   created_at: string
 }
 
@@ -30,7 +36,7 @@ export interface Entrada {
   descricao: string
   valor: number
   data: string
-  categoria?: string
+  categoria?: string | null
   created_at: string
 }
 
@@ -40,8 +46,8 @@ export interface Gasto {
   descricao: string
   valor: number
   data: string
-  categoria?: string
-  forma_pagamento?: string
+  categoria?: string | null
+  forma_pagamento?: string | null
   created_at: string
 }
 
@@ -50,11 +56,21 @@ export interface ContaFixa {
   user_id: string
   descricao: string
   valor: number
-  dia_vencimento?: number
+  // Primeiro vencimento; o dia desta data é o dia de vencimento de todo mês
+  data: string
+  categoria?: string | null
   ativa: boolean
-  // Campos opcionais presentes no banco e usados na UI
-  data?: string
-  categoria?: string
+  created_at: string
+}
+
+export interface PagamentoConta {
+  id: string
+  user_id: string
+  conta_id: string
+  // Mês de referência no formato YYYY-MM
+  mes: string
+  valor: number
+  data_pagamento: string
   created_at: string
 }
 
@@ -63,9 +79,16 @@ export interface ReservaInvestimento {
   user_id: string
   descricao: string
   valor: number
-  tipo: 'reserva_emergencia' | 'meta' | 'investimento'
   data: string
-  // categoria pode existir dependendo da tabela/consulta
-  categoria?: string
+  categoria?: string | null
+  meta_id?: string | null
+  created_at: string
+}
+
+export interface Meta {
+  id: string
+  user_id: string
+  nome: string
+  valor_alvo: number
   created_at: string
 }
