@@ -1,226 +1,225 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { supabase, type Entrada, type Gasto, type ContaFixa, type ReservaInvestimento, type UserProfile } from '@/lib/supabase'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { 
-  Plus, 
-  TrendingUp, 
-  TrendingDown, 
-  Wallet, 
-  PiggyBank, 
-  LogOut,
-  Calendar,
-  AlertCircle,
-  Filter
-} from 'lucide-react'
+import type { User } from '@supabase/supabase-js'
+import { Calendar, LogOut, PiggyBank, Plus, TrendingDown, TrendingUp, Wallet } from 'lucide-react'
+import {
+  supabase,
+  type ContaFixa,
+  type Entrada,
+  type Gasto,
+  type Meta,
+  type PagamentoConta,
+  type ReservaInvestimento,
+} from '@/lib/supabase'
+import { formatarMes, formatarMoeda, mesAtual, mesDe, somar } from '@/lib/formato'
+import { calcularIntervalo, limites, ultimosMeses, type Intervalo, type PeriodoFiltro } from '@/lib/periodo'
+import { avisarErro } from '@/lib/erros'
+import { baixarCSV } from '@/lib/csv'
 import { ResumoCard } from './components/ResumoCard'
-import { TabelaEntradas } from './components/TabelaEntradas'
-import { TabelaGastos } from './components/TabelaGastos'
-import { TabelaContas } from './components/TabelaContas'
-import { TabelaReservas } from './components/TabelaReservas'
+import { FiltroPeriodo } from './components/FiltroPeriodo'
+import { TabelaContas, TabelaEntradas, TabelaGastos, TabelaReservas } from './components/Tabelas'
+import { Metas } from './components/Metas'
+import { EvolucaoMensal, GastosPorCategoria, type FatiaCategoria, type MesResumo } from './components/Graficos'
 import { ModalEntrada } from './components/ModalEntrada'
 import { ModalGasto } from './components/ModalGasto'
 import { ModalConta } from './components/ModalConta'
 import { ModalReserva } from './components/ModalReserva'
+import { ModalMeta } from './components/ModalMeta'
 
-type PeriodoFiltro = 'dia' | 'semana' | 'mes' | 'ano' | 'todos' | 'personalizado'
+type ModalAberto =
+  | { tipo: 'entrada'; item?: Entrada }
+  | { tipo: 'gasto'; item?: Gasto }
+  | { tipo: 'conta'; item?: ContaFixa }
+  | { tipo: 'reserva'; item?: ReservaInvestimento }
+  | { tipo: 'meta'; item?: Meta }
+  | null
+
+interface Historico {
+  entradas: { data: string; valor: number }[]
+  gastos: { data: string; valor: number }[]
+  pagamentos: { data_pagamento: string; valor: number }[]
+}
+
+const MESES_HISTORICO = 6
+const MAX_CATEGORIAS_GRAFICO = 7
 
 export default function DashboardPage() {
   const router = useRouter()
-  const [user, setUser] = useState<any>(null)
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [periodoFiltro, setPeriodoFiltro] = useState<PeriodoFiltro>('mes')
-  const [dataInicio, setDataInicio] = useState('')
-  const [dataFim, setDataFim] = useState('')
-  const [mostrarDatePicker, setMostrarDatePicker] = useState(false)
-  
-  // Estados dos dados
+  const [user, setUser] = useState<User | null>(null)
+  const [nome, setNome] = useState('')
+
+  const [periodo, setPeriodo] = useState<PeriodoFiltro>('mes')
+  const [personalizado, setPersonalizado] = useState<Intervalo>({ inicio: null, fim: null })
+  const intervalo = useMemo(() => calcularIntervalo(periodo, personalizado), [periodo, personalizado])
+
+  // Dados do período filtrado
   const [entradas, setEntradas] = useState<Entrada[]>([])
   const [gastos, setGastos] = useState<Gasto[]>([])
-  const [contas, setContas] = useState<ContaFixa[]>([])
   const [reservas, setReservas] = useState<ReservaInvestimento[]>([])
-  
-  // Estados dos modais
-  const [modalEntrada, setModalEntrada] = useState(false)
-  const [modalGasto, setModalGasto] = useState(false)
-  const [modalConta, setModalConta] = useState(false)
-  const [modalReserva, setModalReserva] = useState(false)
+  const [pagamentosPeriodo, setPagamentosPeriodo] = useState<PagamentoConta[]>([])
+
+  // Dados que não dependem do filtro
+  const [contas, setContas] = useState<ContaFixa[]>([])
+  const [pagamentosMes, setPagamentosMes] = useState<PagamentoConta[]>([])
+  const [metas, setMetas] = useState<Meta[]>([])
+  const [guardadoPorMeta, setGuardadoPorMeta] = useState<Record<string, number>>({})
+  const [historico, setHistorico] = useState<Historico>({ entradas: [], gastos: [], pagamentos: [] })
+
+  const [modal, setModal] = useState<ModalAberto>(null)
 
   useEffect(() => {
-    if (!supabase) {
-      setLoading(false)
-      return
-    }
-    checkUser()
-    loadData()
-  }, [])
-
-  useEffect(() => {
-    if (user) {
-      loadData()
-    }
-  }, [periodoFiltro, dataInicio, dataFim, user])
-
-  const checkUser = async () => {
-    if (!supabase) return
-    
-    try {
+    const carregarUsuario = async () => {
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        router.push('/login')
-      } else {
-        setUser(user)
-        
-        // Buscar perfil do usuário
-        const { data: profile } = await supabase
-          .from('users_profile')
-          .select('*')
-          .eq('user_id', user.id)
-          .single()
-        
-        setUserProfile(profile)
+      if (!user) return router.replace('/login')
+
+      const { data: perfil } = await supabase.from('users_profile').select('display_name').eq('user_id', user.id).maybeSingle()
+      const nomeCadastro = (user.user_metadata?.display_name as string | undefined) || user.email?.split('@')[0] || ''
+
+      // O perfil é criado no primeiro acesso (funciona também quando o cadastro exige confirmar o e-mail)
+      if (!perfil) {
+        await supabase.from('users_profile').insert({ user_id: user.id, display_name: nomeCadastro })
       }
-    } catch (error) {
-      console.error('Erro ao verificar usuário:', error)
+
+      setNome(perfil?.display_name || nomeCadastro)
+      setUser(user)
     }
-    setLoading(false)
-  }
+    carregarUsuario()
+  }, [router])
 
-  const getDataInicio = () => {
-    const hoje = new Date()
-    
-    switch (periodoFiltro) {
-      case 'dia':
-        return hoje.toISOString().split('T')[0]
-      case 'semana':
-        const primeiroDiaSemana = new Date(hoje)
-        primeiroDiaSemana.setDate(hoje.getDate() - hoje.getDay())
-        return primeiroDiaSemana.toISOString().split('T')[0]
-      case 'mes':
-        return new Date(hoje.getFullYear(), hoje.getMonth(), 1).toISOString().split('T')[0]
-      case 'ano':
-        return new Date(hoje.getFullYear(), 0, 1).toISOString().split('T')[0]
-      case 'personalizado':
-        return dataInicio || '1900-01-01'
-      default:
-        return '1900-01-01'
-    }
-  }
+  const carregarPeriodo = useCallback(async () => {
+    if (!user) return
+    const { inicio, fim } = limites(intervalo)
 
-  const getDataFim = () => {
-    if (periodoFiltro === 'personalizado' && dataFim) {
-      return dataFim
-    }
-    return '2100-12-31'
-  }
+    const [e, g, r, p] = await Promise.all([
+      supabase.from('entradas').select('*').eq('user_id', user.id).gte('data', inicio).lte('data', fim).order('data', { ascending: false }),
+      supabase.from('gastos').select('*').eq('user_id', user.id).gte('data', inicio).lte('data', fim).order('data', { ascending: false }),
+      supabase.from('reservas_investimentos').select('*').eq('user_id', user.id).gte('data', inicio).lte('data', fim).order('data', { ascending: false }),
+      supabase.from('contas_pagamentos').select('*').eq('user_id', user.id).gte('data_pagamento', inicio).lte('data_pagamento', fim),
+    ])
 
-  const loadData = async () => {
-    if (!supabase || !user) return
-    
-    try {
-      const inicio = getDataInicio()
-      const fim = getDataFim()
+    const erro = [e, g, r, p].find((resultado) => resultado.error)?.error
+    if (erro) avisarErro('carregar os lançamentos', erro)
 
-      const [entradasData, gastosData, contasData, reservasData] = await Promise.all([
-        supabase
-          .from('entradas')
-          .select('*')
-          .eq('user_id', user.id)
-          .gte('data', inicio)
-          .lte('data', fim)
-          .order('data', { ascending: false }),
-        supabase
-          .from('gastos')
-          .select('*')
-          .eq('user_id', user.id)
-          .gte('data', inicio)
-          .lte('data', fim)
-          .order('data', { ascending: false }),
-        supabase
-          .from('contas_fixas')
-          .select('*')
-          .eq('user_id', user.id)
-          .eq('ativa', true),
-        supabase
-          .from('reservas_investimentos')
-          .select('*')
-          .eq('user_id', user.id)
-          .gte('data', inicio)
-          .lte('data', fim)
-          .order('data', { ascending: false }),
-      ])
+    setEntradas(e.data ?? [])
+    setGastos(g.data ?? [])
+    setReservas(r.data ?? [])
+    setPagamentosPeriodo(p.data ?? [])
+  }, [user, intervalo])
 
-      if (entradasData.data) setEntradas(entradasData.data)
-      if (gastosData.data) setGastos(gastosData.data)
-      if (contasData.data) setContas(contasData.data)
-      if (reservasData.data) setReservas(reservasData.data)
-    } catch (error) {
-      console.error('Erro ao carregar dados:', error)
-    }
-  }
+  const carregarGeral = useCallback(async () => {
+    if (!user) return
+    const meses = ultimosMeses(MESES_HISTORICO)
+    const inicioHistorico = `${meses[0]}-01`
+    const fimHistorico = calcularIntervalo('mes', { inicio: null, fim: null }).fim!
 
-  const handleLogout = async () => {
-    if (!supabase) return
+    const [c, pm, m, rm, he, hg, hp] = await Promise.all([
+      supabase.from('contas_fixas').select('*').eq('user_id', user.id).eq('ativa', true).order('data'),
+      supabase.from('contas_pagamentos').select('*').eq('user_id', user.id).eq('mes', mesAtual()),
+      supabase.from('metas').select('*').eq('user_id', user.id).order('created_at'),
+      supabase.from('reservas_investimentos').select('meta_id, valor').eq('user_id', user.id).not('meta_id', 'is', null),
+      supabase.from('entradas').select('data, valor').eq('user_id', user.id).gte('data', inicioHistorico).lte('data', fimHistorico),
+      supabase.from('gastos').select('data, valor').eq('user_id', user.id).gte('data', inicioHistorico).lte('data', fimHistorico),
+      supabase.from('contas_pagamentos').select('data_pagamento, valor').eq('user_id', user.id).gte('data_pagamento', inicioHistorico).lte('data_pagamento', fimHistorico),
+    ])
+
+    const erro = [c, pm, m, rm, he, hg, hp].find((resultado) => resultado.error)?.error
+    if (erro) avisarErro('carregar contas, metas e histórico', erro)
+
+    setContas(c.data ?? [])
+    setPagamentosMes(pm.data ?? [])
+    setMetas(m.data ?? [])
+    setGuardadoPorMeta(
+      (rm.data ?? []).reduce<Record<string, number>>((acc, r) => {
+        acc[r.meta_id] = (acc[r.meta_id] ?? 0) + Number(r.valor)
+        return acc
+      }, {})
+    )
+    setHistorico({ entradas: he.data ?? [], gastos: hg.data ?? [], pagamentos: hp.data ?? [] })
+  }, [user])
+
+  useEffect(() => {
+    carregarPeriodo()
+  }, [carregarPeriodo])
+
+  useEffect(() => {
+    carregarGeral()
+  }, [carregarGeral])
+
+  const recarregar = useCallback(() => {
+    carregarPeriodo()
+    carregarGeral()
+  }, [carregarPeriodo, carregarGeral])
+
+  const sair = async () => {
     await supabase.auth.signOut()
-    router.push('/login')
+    router.replace('/login')
   }
 
-  const handlePeriodoChange = (periodo: PeriodoFiltro) => {
-    setPeriodoFiltro(periodo)
-    if (periodo === 'personalizado') {
-      setMostrarDatePicker(true)
-    } else {
-      setMostrarDatePicker(false)
-      setDataInicio('')
-      setDataFim('')
-    }
-  }
+  // Totais do período. Saldo = o que entrou menos tudo que saiu ou foi guardado.
+  const totalEntradas = somar(entradas)
+  const totalGastos = somar(gastos)
+  const totalContasPagas = somar(pagamentosPeriodo)
+  const totalReservas = somar(reservas)
+  const saldo = totalEntradas - totalGastos - totalContasPagas - totalReservas
 
-  const aplicarFiltroPersonalizado = () => {
-    if (dataInicio && dataFim) {
-      loadData()
-      setMostrarDatePicker(false)
-    }
-  }
+  const mes = mesAtual()
+  const pendentesMes = somar(
+    contas.filter((c) => mesDe(c.data) <= mes && !pagamentosMes.some((p) => p.conta_id === c.id))
+  )
 
-  // Cálculos
-  const totalEntradas = entradas.reduce((sum, e) => sum + Number(e.valor), 0)
-  const totalGastos = gastos.reduce((sum, g) => sum + Number(g.valor), 0)
-  const totalContas = contas.reduce((sum, c) => sum + Number(c.valor), 0)
-  const totalReservas = reservas.reduce((sum, r) => sum + Number(r.valor), 0)
-  const saldo = totalEntradas - totalGastos - totalContas
+  // Evolução mensal e comparação com o mês anterior
+  const evolucao: MesResumo[] = useMemo(
+    () =>
+      ultimosMeses(MESES_HISTORICO).map((m) => ({
+        mes: formatarMes(m, 'curto'),
+        entradas: somar(historico.entradas.filter((e) => mesDe(e.data) === m)),
+        saidas:
+          somar(historico.gastos.filter((g) => mesDe(g.data) === m)) +
+          somar(historico.pagamentos.filter((p) => mesDe(p.data_pagamento) === m)),
+      })),
+    [historico]
+  )
+  const mesAnterior = ultimosMeses(2)[0]
+  const comparar = periodo === 'mes'
+  const entradasMesAnterior = somar(historico.entradas.filter((e) => mesDe(e.data) === mesAnterior))
+  const gastosMesAnterior = somar(historico.gastos.filter((g) => mesDe(g.data) === mesAnterior))
 
-  // Se Supabase não está configurado
-  if (!supabase) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 to-teal-100 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full">
-          <div className="flex items-center gap-3 mb-4 text-orange-600">
-            <AlertCircle className="w-8 h-8" />
-            <h2 className="text-2xl font-bold">Configuração Necessária</h2>
-          </div>
-          <p className="text-gray-700 mb-4">
-            Para usar o Organizador Financeiro, você precisa configurar o Supabase:
-          </p>
-          <ol className="list-decimal list-inside space-y-2 text-gray-600 mb-6">
-            <li>Crie um projeto em <a href="https://supabase.com" target="_blank" className="text-emerald-600 hover:underline">supabase.com</a></li>
-            <li>Copie a URL e a chave anon/public</li>
-            <li>Configure nas variáveis de ambiente ou conecte via OAuth</li>
-          </ol>
-          <button
-            onClick={() => window.open('https://supabase.com', '_blank')}
-            className="w-full bg-emerald-500 text-white py-3 rounded-lg hover:bg-emerald-600 transition-all font-medium"
-          >
-            Criar Projeto no Supabase
-          </button>
-        </div>
-      </div>
+  const gastosPorCategoria: FatiaCategoria[] = useMemo(() => {
+    const porCategoria = new Map<string, number>()
+    gastos.forEach((g) => {
+      const categoria = g.categoria || 'Sem categoria'
+      porCategoria.set(categoria, (porCategoria.get(categoria) ?? 0) + Number(g.valor))
+    })
+    const ordenado = [...porCategoria.entries()]
+      .map(([categoria, valor]) => ({ categoria, valor }))
+      .sort((a, b) => b.valor - a.valor)
+
+    if (ordenado.length <= MAX_CATEGORIAS_GRAFICO) return ordenado
+    const outras = somar(ordenado.slice(MAX_CATEGORIAS_GRAFICO - 1))
+    return [...ordenado.slice(0, MAX_CATEGORIAS_GRAFICO - 1), { categoria: 'Outras', valor: outras }]
+  }, [gastos])
+
+  const exportar = () => {
+    const nomeConta = (id: string) => contas.find((c) => c.id === id)?.descricao ?? 'Conta fixa'
+    const linhas: (string | number)[][] = [
+      ...entradas.map((e) => ['Entrada', e.data, e.descricao, e.categoria ?? '', '', Number(e.valor)]),
+      ...gastos.map((g) => ['Gasto', g.data, g.descricao, g.categoria ?? '', g.forma_pagamento ?? '', -Number(g.valor)]),
+      ...pagamentosPeriodo.map((p) => ['Conta fixa', p.data_pagamento, `${nomeConta(p.conta_id)} (${p.mes})`, '', '', -Number(p.valor)]),
+      ...reservas.map((r) => ['Reserva', r.data, r.descricao, r.categoria ?? '', '', -Number(r.valor)]),
+    ].sort((a, b) => String(a[1]).localeCompare(String(b[1])))
+
+    if (linhas.length === 0) return avisarErro('exportar', { message: 'Não há lançamentos no período.' })
+
+    baixarCSV(
+      `organizador-financeiro_${intervalo.inicio ?? 'inicio'}_${intervalo.fim ?? 'hoje'}.csv`,
+      ['Tipo', 'Data', 'Descrição', 'Categoria', 'Forma de pagamento', 'Valor'],
+      linhas.map((l) => [l[0], String(l[1]).split('-').reverse().join('/'), ...l.slice(2)])
     )
   }
 
-  if (loading) {
+  if (!user) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-emerald-50 to-teal-100 flex items-center justify-center">
         <div className="text-emerald-600 text-xl">Carregando...</div>
@@ -230,23 +229,20 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 to-teal-100">
-      {/* Header */}
       <header className="bg-white shadow-md">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex justify-between items-center">
             <div>
-              <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
-                💰 Organizador Financeiro
-              </h1>
+              <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">💰 Organizador Financeiro</h1>
               <p className="text-sm text-gray-600 mt-1">
-                Olá, {userProfile?.display_name || user?.email?.split('@')[0]}! 
+                Olá, {nome}!
                 <span className="ml-2 text-emerald-600 font-medium">
                   {new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}
                 </span>
               </p>
             </div>
             <button
-              onClick={handleLogout}
+              onClick={sair}
               className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
             >
               <LogOut className="w-4 h-4" />
@@ -257,211 +253,113 @@ export default function DashboardPage() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Filtro de Período */}
-        <div className="bg-white rounded-xl shadow-md p-4 mb-6">
-          <div className="flex items-center gap-3 flex-wrap">
-            <Filter className="w-5 h-5 text-gray-600" />
-            <span className="text-sm font-medium text-gray-700">Filtrar por período:</span>
-            <div className="flex gap-2 flex-wrap">
-              <button
-                onClick={() => handlePeriodoChange('dia')}
-                className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                  periodoFiltro === 'dia'
-                    ? 'bg-emerald-500 text-white shadow-lg'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                Hoje
-              </button>
-              <button
-                onClick={() => handlePeriodoChange('semana')}
-                className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                  periodoFiltro === 'semana'
-                    ? 'bg-emerald-500 text-white shadow-lg'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                Esta Semana
-              </button>
-              <button
-                onClick={() => handlePeriodoChange('mes')}
-                className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                  periodoFiltro === 'mes'
-                    ? 'bg-emerald-500 text-white shadow-lg'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                Este Mês
-              </button>
-              <button
-                onClick={() => handlePeriodoChange('ano')}
-                className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                  periodoFiltro === 'ano'
-                    ? 'bg-emerald-500 text-white shadow-lg'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                Este Ano
-              </button>
-              <button
-                onClick={() => handlePeriodoChange('todos')}
-                className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                  periodoFiltro === 'todos'
-                    ? 'bg-emerald-500 text-white shadow-lg'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                Todos
-              </button>
-              <button
-                onClick={() => handlePeriodoChange('personalizado')}
-                className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                  periodoFiltro === 'personalizado'
-                    ? 'bg-emerald-500 text-white shadow-lg'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                Personalizado
-              </button>
-            </div>
-          </div>
+        <FiltroPeriodo
+          periodo={periodo}
+          intervalo={intervalo}
+          onPeriodo={setPeriodo}
+          onPersonalizado={(novo) => {
+            setPersonalizado(novo)
+            setPeriodo('personalizado')
+          }}
+          onExportar={exportar}
+        />
 
-          {/* Date Picker para Período Personalizado */}
-          {mostrarDatePicker && (
-            <div className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Data Início
-                  </label>
-                  <input
-                    type="date"
-                    value={dataInicio}
-                    onChange={(e) => setDataInicio(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Data Fim
-                  </label>
-                  <input
-                    type="date"
-                    value={dataFim}
-                    onChange={(e) => setDataFim(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                  />
-                </div>
-              </div>
-              <div className="flex gap-2 mt-4">
-                <button
-                  onClick={aplicarFiltroPersonalizado}
-                  disabled={!dataInicio || !dataFim}
-                  className="flex-1 px-4 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Aplicar Filtro
-                </button>
-                <button
-                  onClick={() => {
-                    setMostrarDatePicker(false)
-                    setPeriodoFiltro('mes')
-                  }}
-                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  Cancelar
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Cards de Resumo */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <ResumoCard
             titulo="Entradas"
             valor={totalEntradas}
             icon={<TrendingUp className="w-6 h-6" />}
             cor="emerald"
+            anterior={comparar ? entradasMesAnterior : undefined}
+            rotuloAnterior="mês anterior"
           />
           <ResumoCard
             titulo="Gastos"
             valor={totalGastos}
             icon={<TrendingDown className="w-6 h-6" />}
             cor="red"
+            anterior={comparar ? gastosMesAnterior : undefined}
+            rotuloAnterior="mês anterior"
           />
           <ResumoCard
-            titulo="Contas Fixas"
-            valor={totalContas}
+            titulo="Contas Fixas Pagas"
+            valor={totalContasPagas}
             icon={<Calendar className="w-6 h-6" />}
             cor="orange"
+            detalhe={`Pendentes em ${formatarMes(mes, 'curto')}: ${formatarMoeda(pendentesMes)}`}
           />
-          <ResumoCard
-            titulo="Reservas & Investimentos"
-            valor={totalReservas}
-            icon={<PiggyBank className="w-6 h-6" />}
-            cor="blue"
-          />
+          <ResumoCard titulo="Reservas & Investimentos" valor={totalReservas} icon={<PiggyBank className="w-6 h-6" />} cor="blue" />
         </div>
 
-        {/* Saldo Disponível */}
         <div className="bg-gradient-to-r from-emerald-500 to-teal-600 rounded-2xl shadow-2xl p-6 mb-8 text-white">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-emerald-100 text-sm mb-1">Saldo Disponível</p>
-              <h2 className="text-4xl font-bold">
-                R$ {saldo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-              </h2>
+              <p className="text-emerald-100 text-sm mb-1">Saldo do Período</p>
+              <h2 className="text-4xl font-bold">{formatarMoeda(saldo)}</h2>
+              <p className="text-emerald-100 text-xs mt-2">Entradas − gastos − contas pagas − reservas</p>
             </div>
             <Wallet className="w-16 h-16 text-emerald-200" />
           </div>
         </div>
 
-        {/* Botões de Ação */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <button
-            onClick={() => setModalEntrada(true)}
-            className="flex items-center justify-center gap-2 bg-emerald-500 text-white px-4 py-3 rounded-xl hover:bg-emerald-600 transition-all shadow-lg hover:shadow-xl"
-          >
-            <Plus className="w-5 h-5" />
-            <span className="font-medium">Nova Entrada</span>
-          </button>
-          <button
-            onClick={() => setModalGasto(true)}
-            className="flex items-center justify-center gap-2 bg-red-500 text-white px-4 py-3 rounded-xl hover:bg-red-600 transition-all shadow-lg hover:shadow-xl"
-          >
-            <Plus className="w-5 h-5" />
-            <span className="font-medium">Novo Gasto</span>
-          </button>
-          <button
-            onClick={() => setModalConta(true)}
-            className="flex items-center justify-center gap-2 bg-orange-500 text-white px-4 py-3 rounded-xl hover:bg-orange-600 transition-all shadow-lg hover:shadow-xl"
-          >
-            <Plus className="w-5 h-5" />
-            <span className="font-medium">Nova Conta</span>
-          </button>
-          <button
-            onClick={() => setModalReserva(true)}
-            className="flex items-center justify-center gap-2 bg-blue-500 text-white px-4 py-3 rounded-xl hover:bg-blue-600 transition-all shadow-lg hover:shadow-xl"
-          >
-            <Plus className="w-5 h-5" />
-            <span className="font-medium">Nova Reserva</span>
-          </button>
+          {(
+            [
+              { tipo: 'entrada', rotulo: 'Nova Entrada', classe: 'bg-emerald-500 hover:bg-emerald-600' },
+              { tipo: 'gasto', rotulo: 'Novo Gasto', classe: 'bg-red-500 hover:bg-red-600' },
+              { tipo: 'conta', rotulo: 'Nova Conta', classe: 'bg-orange-500 hover:bg-orange-600' },
+              { tipo: 'reserva', rotulo: 'Nova Reserva', classe: 'bg-blue-500 hover:bg-blue-600' },
+            ] as const
+          ).map(({ tipo, rotulo, classe }) => (
+            <button
+              key={tipo}
+              onClick={() => setModal({ tipo })}
+              className={`flex items-center justify-center gap-2 text-white px-4 py-3 rounded-xl transition-all shadow-lg hover:shadow-xl ${classe}`}
+            >
+              <Plus className="w-5 h-5" />
+              <span className="font-medium">{rotulo}</span>
+            </button>
+          ))}
         </div>
 
-        {/* Tabelas */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+          <EvolucaoMensal dados={evolucao} />
+          <GastosPorCategoria dados={gastosPorCategoria} />
+        </div>
+
         <div className="space-y-6">
-          <TabelaEntradas entradas={entradas} onReload={loadData} />
-          <TabelaGastos gastos={gastos} onReload={loadData} />
-          <TabelaContas contas={contas} onReload={loadData} />
-          <TabelaReservas reservas={reservas} onReload={loadData} />
+          <TabelaEntradas entradas={entradas} onEditar={(item) => setModal({ tipo: 'entrada', item })} onReload={recarregar} />
+          <TabelaGastos gastos={gastos} onEditar={(item) => setModal({ tipo: 'gasto', item })} onReload={recarregar} />
+          <TabelaContas
+            userId={user.id}
+            contas={contas}
+            pagamentosMes={pagamentosMes}
+            onEditar={(item) => setModal({ tipo: 'conta', item })}
+            onReload={recarregar}
+          />
+          <TabelaReservas
+            reservas={reservas}
+            metas={metas}
+            onEditar={(item) => setModal({ tipo: 'reserva', item })}
+            onReload={recarregar}
+          />
+          <Metas
+            metas={metas}
+            guardadoPorMeta={guardadoPorMeta}
+            onNova={() => setModal({ tipo: 'meta' })}
+            onEditar={(item) => setModal({ tipo: 'meta', item })}
+            onReload={recarregar}
+          />
         </div>
       </main>
 
-      {/* Modais */}
-      {modalEntrada && <ModalEntrada onClose={() => setModalEntrada(false)} onSuccess={loadData} />}
-      {modalGasto && <ModalGasto onClose={() => setModalGasto(false)} onSuccess={loadData} />}
-      {modalConta && <ModalConta onClose={() => setModalConta(false)} onSuccess={loadData} />}
-      {modalReserva && <ModalReserva onClose={() => setModalReserva(false)} onSuccess={loadData} />}
+      {modal?.tipo === 'entrada' && <ModalEntrada userId={user.id} item={modal.item} onClose={() => setModal(null)} onSuccess={recarregar} />}
+      {modal?.tipo === 'gasto' && <ModalGasto userId={user.id} item={modal.item} onClose={() => setModal(null)} onSuccess={recarregar} />}
+      {modal?.tipo === 'conta' && <ModalConta userId={user.id} item={modal.item} onClose={() => setModal(null)} onSuccess={recarregar} />}
+      {modal?.tipo === 'reserva' && (
+        <ModalReserva userId={user.id} metas={metas} item={modal.item} onClose={() => setModal(null)} onSuccess={recarregar} />
+      )}
+      {modal?.tipo === 'meta' && <ModalMeta userId={user.id} item={modal.item} onClose={() => setModal(null)} onSuccess={recarregar} />}
     </div>
   )
 }
